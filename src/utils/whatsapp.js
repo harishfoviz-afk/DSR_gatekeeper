@@ -66,6 +66,45 @@ _GateKeeper AI • Automated Community Access_`;
 }
 
 /**
+ * Extracts all registered approvers for a flat (supporting multiple phones/residents)
+ * @param {object} flat - Flat record { residentName, phone, residentName2, phone2 }
+ * @returns {Array} Array of { name, phone, cleanedPhone, label }
+ */
+export function getFlatApprovers(flat) {
+  if (!flat) return [];
+  const approvers = [];
+
+  if (flat.phone) {
+    const rawPhones = String(flat.phone).split(/[,;/]+/).map(p => p.trim()).filter(Boolean);
+    rawPhones.forEach((p, idx) => {
+      const clean = cleanPhoneNumber(p);
+      if (clean) {
+        approvers.push({
+          name: idx === 0 ? (flat.residentName || 'Primary Resident') : `Approver ${idx + 1}`,
+          phone: p,
+          cleanedPhone: clean,
+          label: idx === 0 ? (flat.residentName || 'Primary Approver') : `Approver ${idx + 1}`
+        });
+      }
+    });
+  }
+
+  if (flat.phone2) {
+    const clean2 = cleanPhoneNumber(flat.phone2);
+    if (clean2 && !approvers.some(a => a.cleanedPhone === clean2)) {
+      approvers.push({
+        name: flat.residentName2 || 'Secondary Approver',
+        phone: flat.phone2.trim(),
+        cleanedPhone: clean2,
+        label: flat.residentName2 || 'Co-Resident / Approver 2'
+      });
+    }
+  }
+
+  return approvers;
+}
+
+/**
  * Generates the full wa.me deep link URL
  * @param {string} residentPhone - Resident phone number
  * @param {object} visitorData - Visitor object { id, visitorName, flatNumber, purpose, ... }

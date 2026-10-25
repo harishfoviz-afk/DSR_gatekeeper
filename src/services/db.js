@@ -363,6 +363,26 @@ export async function deleteVisitor(id) {
   saveLocalVisitors(updated);
 }
 
+export async function clearAllVisitors() {
+  const firebaseStatus = initFirebaseIfAvailable();
+  if (firebaseStatus.isFirebase && firestoreDb) {
+    try {
+      const current = getLocalVisitors();
+      for (const v of current) {
+        try {
+          await deleteDoc(doc(firestoreDb, 'visitors', v.id));
+        } catch (e) {
+          // ignore
+        }
+      }
+    } catch (err) {
+      console.warn("Firestore clearAll failed:", err);
+    }
+  }
+
+  saveLocalVisitors([]);
+}
+
 export function resetSeedData(resetSociety = false) {
   saveLocalVisitors(INITIAL_VISITORS);
   if (resetSociety) {

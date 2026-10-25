@@ -24,27 +24,35 @@ import {
   FileSpreadsheet,
   Search,
   Filter,
-  Smartphone
+  Smartphone,
+  Lock,
+  UserCheck,
+  Users
 } from 'lucide-react';
-import { saveSocietyConfig, resetSeedData } from '../../services/db';
+import { saveSocietyConfig, resetSeedData, deleteVisitor, clearAllVisitors } from '../../services/db';
+import DeleteAuditModal from '../Shared/DeleteAuditModal';
 
-export default function AdminPanel({ societyConfig, onUpdateConfig, visitors = [] }) {
+export default function AdminPanel({ societyConfig, onUpdateConfig, visitors = [], onLockAdmin }) {
   const [activeTab, setActiveTab] = useState('flats'); // 'flats' | 'blocks' | 'guards' | 'society' | 'logs'
   const [config, setConfig] = useState(societyConfig || {});
   const [profileDirty, setProfileDirty] = useState(false);
   const [savedSuccess, setSavedSuccess] = useState(false);
 
-  // Form states for adding a new flat
+  // Form states for adding a new flat (supports multiple approvers!)
   const [newFlatNum, setNewFlatNum] = useState('');
   const [newFlatBlock, setNewFlatBlock] = useState(config.blocks?.[0] || 'Block DSR');
   const [newFlatFloor, setNewFlatFloor] = useState(1);
   const [newResidentName, setNewResidentName] = useState('');
   const [newResidentPhone, setNewResidentPhone] = useState('');
+  const [newResidentName2, setNewResidentName2] = useState('');
+  const [newResidentPhone2, setNewResidentPhone2] = useState('');
 
   // Inline Flat Editing states
   const [editingFlatId, setEditingFlatId] = useState(null);
   const [editName, setEditName] = useState('');
   const [editPhone, setEditPhone] = useState('');
+  const [editName2, setEditName2] = useState('');
+  const [editPhone2, setEditPhone2] = useState('');
   const [editFloor, setEditFloor] = useState(1);
   const [editBlock, setEditBlock] = useState('');
 
@@ -62,6 +70,11 @@ export default function AdminPanel({ societyConfig, onUpdateConfig, visitors = [
   const [filterEndDate, setFilterEndDate] = useState('');
   const [filterStatus, setFilterStatus] = useState('ALL');
   const [searchLogQuery, setSearchLogQuery] = useState('');
+
+  // Master Deletion Modal States (Password: DSRKUNTA)
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [deleteTargetId, setDeleteTargetId] = useState(null);
+  const [deleteTargetName, setDeleteTargetName] = useState('');
 
   // Keep local config in sync with parent prop, preserving active edits
   useEffect(() => {
@@ -92,7 +105,7 @@ export default function AdminPanel({ societyConfig, onUpdateConfig, visitors = [
   };
 
   // ----------------------------------------------------
-  // FLAT OPERATIONS
+  // FLAT OPERATIONS (WITH MULTI-APPROVER SUPPORT)
   // ----------------------------------------------------
   const handleAddFlat = (e) => {
     e.preventDefault();
@@ -110,6 +123,8 @@ export default function AdminPanel({ societyConfig, onUpdateConfig, visitors = [
       floor: Number(newFlatFloor) || 1,
       residentName: newResidentName.trim() || 'Resident',
       phone: newResidentPhone.trim() || '',
+      residentName2: newResidentName2.trim() || '',
+      phone2: newResidentPhone2.trim() || '',
     };
 
     const updated = {
@@ -121,6 +136,8 @@ export default function AdminPanel({ societyConfig, onUpdateConfig, visitors = [
     setNewFlatNum('');
     setNewResidentName('');
     setNewResidentPhone('');
+    setNewResidentName2('');
+    setNewResidentPhone2('');
   };
 
   const handleDeleteFlat = (flatId) => {
@@ -137,6 +154,8 @@ export default function AdminPanel({ societyConfig, onUpdateConfig, visitors = [
     setEditingFlatId(flat.id || flat.number);
     setEditName(flat.residentName || '');
     setEditPhone(flat.phone || '');
+    setEditName2(flat.residentName2 || '');
+    setEditPhone2(flat.phone2 || '');
     setEditFloor(flat.floor || 1);
     setEditBlock(flat.block || (flat.number?.includes('-') ? flat.number.split('-')[0] : config.blocks?.[0] || 'Block DSR'));
   };
@@ -152,6 +171,8 @@ export default function AdminPanel({ societyConfig, onUpdateConfig, visitors = [
           ...f,
           residentName: editName.trim() || 'Resident',
           phone: editPhone.trim(),
+          residentName2: editName2.trim() || '',
+          phone2: editPhone2.trim() || '',
           floor: Number(editFloor) || 1,
           block: editBlock || f.block,
         };
@@ -250,6 +271,38 @@ export default function AdminPanel({ societyConfig, onUpdateConfig, visitors = [
       showResidentApp: shouldShow
     };
     triggerSave(updated);
+  };
+
+  // ----------------------------------------------------
+  // MASTER DELETION HANDLERS (REQUIRES DSRKUNTA PASSCODE)
+  // ----------------------------------------------------
+  const handleRequestDeleteOne = (visitor) => {
+    setDeleteTargetId(visitor.id);
+    setDeleteTargetName(`${visitor.visitorName} (${visitor.flatNumber})`);
+    setIsDeleteModalOpen(true);
+  };
+
+  const handleRequestPurgeAll = () => {
+    setDeleteTargetId('ALL');
+    setDeleteTargetName('All Visitor Audit Logs');
+    setIsDeleteModalOpen(true);
+  };
+
+  const handleExecuteAuthorizedDelete = async () => {
+    try {
+      if (deleteTargetId === 'ALL') {
+        await clearAllVisitors();
+      } else if (deleteTargetId) {
+        await deleteVisitor(deleteTargetId);
+      }
+      setIsDeleteModalOpen(false);
+      setDeleteTargetId(null);
+      setSavedSuccess(true);
+      setTimeout(() => setSavedSuccess(false), 2500);
+    } catch (err) {
+      console.error("Delete failed:", err);
+      alert("Failed to delete record. Please check permissions.");
+    }
   };
 
   // ----------------------------------------------------
@@ -401,16 +454,16 @@ export default function AdminPanel({ societyConfig, onUpdateConfig, visitors = [
   };
 
   return (
-    <div className="max-w-6xl mx-auto px-4 py-6">
+    <div className="max-w-6xl mx-auto px-3 sm:px-6 py-4 sm:py-6">
       {/* Admin Panel Header */}
-      <div className="bg-slate-900 border-2 border-emerald-500/40 rounded-3xl p-5 sm:p-6 shadow-2xl mb-6 flex flex-wrap items-center justify-between gap-4">
+      <div className="bg-slate-900 border-2 border-emerald-500/40 rounded-3xl p-4 sm:p-6 shadow-2xl mb-6 flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-3.5">
-          <div className="w-12 h-12 bg-emerald-500/20 border-2 border-emerald-400 rounded-2xl flex items-center justify-center text-emerald-400 shadow-lg">
+          <div className="w-12 h-12 bg-emerald-500/20 border-2 border-emerald-400 rounded-2xl flex items-center justify-center text-emerald-400 shadow-lg shrink-0">
             <Building2 className="w-7 h-7 stroke-[2.5]" />
           </div>
           <div>
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-xs uppercase font-extrabold tracking-widest text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-md border border-emerald-500/30">
+              <span className="text-[10px] sm:text-xs uppercase font-extrabold tracking-widest text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-md border border-emerald-500/30">
                 Facility & Society Administration
               </span>
               {savedSuccess ? (
@@ -422,13 +475,13 @@ export default function AdminPanel({ societyConfig, onUpdateConfig, visitors = [
                   <Sparkles className="w-3.5 h-3.5 text-amber-400" /> Unsaved changes...
                 </span>
               ) : (
-                <span className="text-[11px] text-slate-400 bg-slate-800/80 px-2 py-0.5 rounded-full border border-slate-700">
-                  Data Persistently Saved in LocalStorage & Cloud
+                <span className="text-[10px] sm:text-[11px] text-slate-400 bg-slate-800/80 px-2 py-0.5 rounded-full border border-slate-700">
+                  Firebase Cloud Synced
                 </span>
               )}
 
               {/* Show Resident App Status Pill */}
-              <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full border flex items-center gap-1 ${
+              <span className={`text-[10px] sm:text-[11px] font-bold px-2.5 py-0.5 rounded-full border flex items-center gap-1 ${
                 config.showResidentApp !== false
                   ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
                   : 'bg-rose-500/15 text-rose-400 border-rose-500/30'
@@ -438,7 +491,7 @@ export default function AdminPanel({ societyConfig, onUpdateConfig, visitors = [
               </span>
             </div>
             <div className="flex items-center gap-2 mt-1">
-              <h2 className="text-2xl sm:text-3xl font-black text-white tracking-tight">
+              <h2 className="text-xl sm:text-3xl font-black text-white tracking-tight">
                 {config.societyName || 'Divi Sri Residency'}
               </h2>
               <button
@@ -456,8 +509,8 @@ export default function AdminPanel({ societyConfig, onUpdateConfig, visitors = [
           </div>
         </div>
 
-        {/* Quick Action Export & Save */}
-        <div className="flex items-center gap-2">
+        {/* Quick Action Export, Save & Lock Console */}
+        <div className="flex items-center gap-2 flex-wrap">
           {profileDirty && (
             <button
               onClick={handleSaveProfile}
@@ -467,6 +520,7 @@ export default function AdminPanel({ societyConfig, onUpdateConfig, visitors = [
               <span>Save Changes</span>
             </button>
           )}
+
           <button
             onClick={() => {
               setActiveTab('logs');
@@ -478,17 +532,30 @@ export default function AdminPanel({ societyConfig, onUpdateConfig, visitors = [
             <FileSpreadsheet className="w-4 h-4 stroke-[2.5]" />
             <span>Download CSV Report</span>
           </button>
+
+          {/* REQUIREMENT 1: LOCK ADMIN CONSOLE */}
+          {onLockAdmin && (
+            <button
+              type="button"
+              onClick={onLockAdmin}
+              className="flex items-center gap-1.5 px-3 py-2 bg-slate-800 hover:bg-rose-950/40 text-slate-300 hover:text-rose-300 border border-slate-700 hover:border-rose-500/40 rounded-xl text-xs font-bold transition"
+              title="Lock Admin Console"
+            >
+              <Lock className="w-3.5 h-3.5 text-amber-400" />
+              <span>Lock Console</span>
+            </button>
+          )}
         </div>
       </div>
 
       {/* Tab Navigation */}
       <div className="flex flex-wrap gap-2 mb-6 border-b border-slate-800 pb-3">
         {[
-          { id: 'flats', label: 'Flats & Residents', sub: 'Apartments & Mobile Directory', icon: DoorClosed, count: config.flats?.length || 0 },
+          { id: 'flats', label: 'Flats & Residents', sub: 'Apartments & Multi-Approver Directory', icon: DoorClosed, count: config.flats?.length || 0 },
           { id: 'blocks', label: 'Blocks & Floors', sub: 'Towers & Floor Levels', icon: Layers, count: config.blocks?.length || 0 },
           { id: 'guards', label: 'Security Guards', sub: 'Staff & Shift Rosters', icon: Shield, count: config.guards?.length || 0 },
           { id: 'society', label: 'Apartment Profile', sub: 'Society & Resident App Visibility', icon: Building2 },
-          { id: 'logs', label: 'Audit Records', sub: 'Date Filters & Report Export', icon: Info, count: visitors.length },
+          { id: 'logs', label: 'Audit Records', sub: 'Date Filters, Report Export & Delete Logs', icon: Info, count: visitors.length },
         ].map(tab => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;
@@ -496,7 +563,7 @@ export default function AdminPanel({ societyConfig, onUpdateConfig, visitors = [
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`flex items-center gap-2.5 px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-bold transition ${
+              className={`flex items-center gap-2.5 px-3.5 py-2 sm:px-4 sm:py-2.5 rounded-2xl text-xs sm:text-sm font-bold transition ${
                 isActive
                   ? 'bg-emerald-500 text-slate-950 shadow-lg shadow-emerald-500/20'
                   : 'bg-slate-900 border border-slate-800 text-slate-400 hover:text-white hover:border-slate-700'
@@ -512,23 +579,24 @@ export default function AdminPanel({ societyConfig, onUpdateConfig, visitors = [
         })}
       </div>
 
-      {/* TAB 1: FLATS & RESIDENTS DIRECTORY */}
+      {/* TAB 1: FLATS & RESIDENTS DIRECTORY (WITH MULTI-APPROVER SUPPORT) */}
       {activeTab === 'flats' && (
         <div className="space-y-6">
-          {/* Add Flat Form with Mobile / WhatsApp Field */}
+          {/* Add Flat Form with Multiple Approvers */}
           <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 shadow-xl">
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-base font-black text-white flex items-center gap-2">
                 <Plus className="w-5 h-5 text-emerald-400" />
-                <span>Add New Flat to Community</span>
+                <span>Add Flat & Approvers</span>
               </h3>
-              <span className="text-xs text-slate-400">
-                All details persist automatically in society configuration
+              <span className="text-xs text-slate-400 flex items-center gap-1">
+                <Users className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Multiple Approvers Supported</span>
               </span>
             </div>
 
-            <form onSubmit={handleAddFlat} className="space-y-3">
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+            <form onSubmit={handleAddFlat} className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 {/* Block Selection */}
                 <div>
                   <label className="block text-[11px] font-semibold text-slate-400 mb-1">
@@ -539,7 +607,7 @@ export default function AdminPanel({ societyConfig, onUpdateConfig, visitors = [
                     onChange={(e) => setNewFlatBlock(e.target.value)}
                     className="w-full px-3 py-2.5 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-500 font-bold"
                   >
-                    {(config.blocks || ['Block DSR', 'A', 'B', 'C', 'D']).map(b => (
+                    {(config.blocks || ['Block DSR']).map(b => (
                       <option key={b} value={b}>Block {b}</option>
                     ))}
                   </select>
@@ -548,12 +616,12 @@ export default function AdminPanel({ societyConfig, onUpdateConfig, visitors = [
                 {/* Flat Number */}
                 <div>
                   <label className="block text-[11px] font-semibold text-slate-400 mb-1">
-                    Flat No. (e.g. 101, 502) *
+                    Flat No. (e.g. 502, 101) *
                   </label>
                   <input
                     type="text"
                     required
-                    placeholder="e.g. 502 or A-101"
+                    placeholder="e.g. 502"
                     value={newFlatNum}
                     onChange={(e) => setNewFlatNum(e.target.value)}
                     className="w-full px-3 py-2.5 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-500 font-mono font-bold"
@@ -574,62 +642,81 @@ export default function AdminPanel({ societyConfig, onUpdateConfig, visitors = [
                     className="w-full px-3 py-2.5 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-500 font-mono"
                   />
                 </div>
+              </div>
 
-                {/* Resident / Owner Name */}
-                <div>
-                  <label className="block text-[11px] font-semibold text-slate-400 mb-1">
-                    Resident Name *
-                  </label>
-                  <div className="relative">
-                    <User className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-3.5" />
+              {/* REQUIREMENT 4: MORE THAN 1 APPROVER INPUTS */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-4 bg-slate-950/70 border border-slate-800 rounded-2xl">
+                {/* Primary Approver */}
+                <div className="space-y-2">
+                  <div className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
+                    <UserCheck className="w-3.5 h-3.5" />
+                    <span>Primary Approver *</span>
+                  </div>
+                  <div>
                     <input
                       type="text"
                       required
-                      placeholder="e.g. Harish Kumar"
+                      placeholder="Full Name (e.g. Harish)"
                       value={newResidentName}
                       onChange={(e) => setNewResidentName(e.target.value)}
-                      className="w-full pl-8 pr-3 py-2.5 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-500"
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-500 mb-2"
+                    />
+                    <input
+                      type="tel"
+                      required
+                      placeholder="Mobile / WhatsApp (e.g. 9876543210)"
+                      value={newResidentPhone}
+                      onChange={(e) => setNewResidentPhone(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-900 border border-emerald-500/50 rounded-xl text-xs text-white font-mono focus:outline-none focus:border-emerald-400"
                     />
                   </div>
                 </div>
 
-                {/* Mobile / WhatsApp Number Field */}
-                <div>
-                  <label className="block text-[11px] font-semibold text-emerald-400 mb-1 flex items-center justify-between">
-                    <span>Mobile / WhatsApp *</span>
-                    <span className="text-[10px] text-emerald-400/80 font-normal">For WhatsApp</span>
-                  </label>
-                  <div className="relative">
-                    <Phone className="w-3.5 h-3.5 text-emerald-400 absolute left-3 top-3.5" />
+                {/* Secondary Approver (Co-Owner / Family) */}
+                <div className="space-y-2">
+                  <div className="text-xs font-bold text-slate-300 flex items-center justify-between">
+                    <span className="flex items-center gap-1.5">
+                      <Users className="w-3.5 h-3.5 text-slate-400" />
+                      <span>Secondary Approver (Optional)</span>
+                    </span>
+                    <span className="text-[10px] text-slate-500">Co-Resident / Family</span>
+                  </div>
+                  <div>
+                    <input
+                      type="text"
+                      placeholder="Full Name (e.g. Spouse / Co-Owner)"
+                      value={newResidentName2}
+                      onChange={(e) => setNewResidentName2(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-500 mb-2"
+                    />
                     <input
                       type="tel"
-                      required
-                      placeholder="e.g. 9876543210"
-                      value={newResidentPhone}
-                      onChange={(e) => setNewResidentPhone(e.target.value)}
-                      className="w-full pl-8 pr-3 py-2.5 bg-slate-950 border border-emerald-500/50 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-400 font-mono font-medium placeholder:text-slate-600"
+                      placeholder="Mobile / WhatsApp 2 (e.g. 9123456789)"
+                      value={newResidentPhone2}
+                      onChange={(e) => setNewResidentPhone2(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-white font-mono focus:outline-none focus:border-emerald-400"
                     />
                   </div>
                 </div>
               </div>
 
-              <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+              <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
                 <p className="text-[11px] text-slate-400 flex items-center gap-1.5">
                   <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>Visitor arrival WhatsApp approval messages will be sent directly to this number.</span>
+                  <span>Either registered approver can review and tap to approve entry on WhatsApp.</span>
                 </p>
                 <button
                   type="submit"
                   className="px-6 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black rounded-xl text-xs transition shadow-lg shadow-emerald-500/20 flex items-center gap-2 whitespace-nowrap"
                 >
                   <Plus className="w-4 h-4 stroke-[3]" />
-                  <span>Save Flat & Owner Details</span>
+                  <span>Save Flat & Approvers</span>
                 </button>
               </div>
             </form>
           </div>
 
-          {/* Directory Table with Inline Edit Support */}
+          {/* Directory Table with Multi-Approver Support & Inline Edit */}
           <div className="bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-xl">
             <div className="p-4 bg-slate-950/70 border-b border-slate-800 flex flex-wrap items-center justify-between gap-2">
               <div>
@@ -637,12 +724,9 @@ export default function AdminPanel({ societyConfig, onUpdateConfig, visitors = [
                   Active Flats Directory ({config.flats?.length || 0} Registered)
                 </span>
                 <p className="text-[11px] text-slate-500">
-                  Tap ✏️ to update any resident name or mobile number inline
+                  Tap ✏️ to update resident names or add second approvers inline
                 </p>
               </div>
-              <span className="text-xs text-emerald-400/90 font-medium bg-emerald-500/10 px-2.5 py-1 rounded-full border border-emerald-500/30">
-                {config.flats?.filter(f => f.phone).length || 0} / {config.flats?.length || 0} WhatsApp Enabled
-              </span>
             </div>
 
             <div className="overflow-x-auto">
@@ -652,8 +736,8 @@ export default function AdminPanel({ societyConfig, onUpdateConfig, visitors = [
                     <th className="py-3 px-4">Flat Number</th>
                     <th className="py-3 px-4">Block / Tower</th>
                     <th className="py-3 px-4">Floor</th>
-                    <th className="py-3 px-4">Resident Name</th>
-                    <th className="py-3 px-4">Mobile / WhatsApp</th>
+                    <th className="py-3 px-4">Approver 1 (Primary)</th>
+                    <th className="py-3 px-4">Approver 2 (Secondary)</th>
                     <th className="py-3 px-4 text-right">Actions</th>
                   </tr>
                 </thead>
@@ -674,7 +758,7 @@ export default function AdminPanel({ societyConfig, onUpdateConfig, visitors = [
                               onChange={(e) => setEditBlock(e.target.value)}
                               className="px-2 py-1.5 bg-slate-950 border border-slate-700 rounded-lg text-xs text-white"
                             >
-                              {(config.blocks || ['Block DSR', 'A', 'B', 'C', 'D']).map(b => (
+                              {(config.blocks || ['Block DSR']).map(b => (
                                 <option key={b} value={b}>Block {b}</option>
                               ))}
                             </select>
@@ -689,22 +773,36 @@ export default function AdminPanel({ societyConfig, onUpdateConfig, visitors = [
                               className="w-16 px-2 py-1.5 bg-slate-950 border border-slate-700 rounded-lg text-xs text-white font-mono"
                             />
                           </td>
-                          <td className="py-2.5 px-4">
+                          <td className="py-2.5 px-4 space-y-1">
                             <input
                               type="text"
                               value={editName}
                               onChange={(e) => setEditName(e.target.value)}
-                              placeholder="Resident Name"
-                              className="w-full px-2.5 py-1.5 bg-slate-950 border border-slate-700 rounded-lg text-xs text-white"
+                              placeholder="Approver 1 Name"
+                              className="w-full px-2 py-1 bg-slate-950 border border-slate-700 rounded-lg text-xs text-white mb-1"
                             />
-                          </td>
-                          <td className="py-2.5 px-4">
                             <input
                               type="tel"
                               value={editPhone}
                               onChange={(e) => setEditPhone(e.target.value)}
-                              placeholder="e.g. 9876543210"
-                              className="w-full px-2.5 py-1.5 bg-slate-950 border border-emerald-500/70 rounded-lg text-xs text-emerald-400 font-mono"
+                              placeholder="Mobile 1"
+                              className="w-full px-2 py-1 bg-slate-950 border border-emerald-500/70 rounded-lg text-xs text-emerald-400 font-mono"
+                            />
+                          </td>
+                          <td className="py-2.5 px-4 space-y-1">
+                            <input
+                              type="text"
+                              value={editName2}
+                              onChange={(e) => setEditName2(e.target.value)}
+                              placeholder="Approver 2 Name"
+                              className="w-full px-2 py-1 bg-slate-950 border border-slate-700 rounded-lg text-xs text-white mb-1"
+                            />
+                            <input
+                              type="tel"
+                              value={editPhone2}
+                              onChange={(e) => setEditPhone2(e.target.value)}
+                              placeholder="Mobile 2"
+                              className="w-full px-2 py-1 bg-slate-950 border border-slate-700 rounded-lg text-xs text-slate-300 font-mono"
                             />
                           </td>
                           <td className="py-2.5 px-4 text-right">
@@ -742,25 +840,28 @@ export default function AdminPanel({ societyConfig, onUpdateConfig, visitors = [
                         <td className="py-3 px-4 text-slate-400 font-mono">
                           Floor {f.floor || '1'}
                         </td>
-                        <td className="py-3 px-4 font-medium text-white">
-                          {f.residentName || 'Resident'}
-                        </td>
                         <td className="py-3 px-4">
+                          <div className="font-medium text-white">{f.residentName || 'Resident'}</div>
                           {f.phone ? (
-                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 rounded-lg font-mono font-medium text-[11px]">
-                              <Phone className="w-3 h-3 text-emerald-400" />
-                              <span>{f.phone}</span>
+                            <span className="inline-flex items-center gap-1 text-[11px] font-mono text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20 mt-0.5">
+                              <Phone className="w-3 h-3" /> {f.phone}
                             </span>
                           ) : (
-                            <button
-                              type="button"
-                              onClick={() => startEditingFlat(f)}
-                              className="inline-flex items-center gap-1 px-2.5 py-1 bg-amber-500/10 border border-amber-500/30 text-amber-400 rounded-lg text-[11px] hover:bg-amber-500/20 transition"
-                              title="Click to add mobile number"
-                            >
-                              <AlertTriangle className="w-3 h-3 text-amber-400" />
-                              <span>Missing Mobile (Add ✏️)</span>
-                            </button>
+                            <span className="text-[10px] text-amber-400">No mobile</span>
+                          )}
+                        </td>
+                        <td className="py-3 px-4">
+                          {f.residentName2 || f.phone2 ? (
+                            <div>
+                              <div className="font-medium text-slate-300">{f.residentName2 || 'Approver 2'}</div>
+                              {f.phone2 && (
+                                <span className="inline-flex items-center gap-1 text-[11px] font-mono text-slate-300 bg-slate-800 px-2 py-0.5 rounded border border-slate-700 mt-0.5">
+                                  <Phone className="w-3 h-3 text-emerald-400" /> {f.phone2}
+                                </span>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-slate-500 text-[11px]">—</span>
                           )}
                         </td>
                         <td className="py-3 px-4 text-right">
@@ -769,7 +870,7 @@ export default function AdminPanel({ societyConfig, onUpdateConfig, visitors = [
                               type="button"
                               onClick={() => startEditingFlat(f)}
                               className="p-1.5 text-slate-400 hover:text-emerald-400 hover:bg-slate-800 rounded-lg transition"
-                              title="Edit flat & contact"
+                              title="Edit flat & approvers"
                             >
                               <Edit2 className="w-4 h-4" />
                             </button>
@@ -796,20 +897,19 @@ export default function AdminPanel({ societyConfig, onUpdateConfig, visitors = [
       {/* TAB 2: BLOCKS & FLOORS */}
       {activeTab === 'blocks' && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* Blocks Configuration */}
           <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 shadow-xl">
             <h3 className="text-base font-black text-white mb-2 flex items-center gap-2">
               <Layers className="w-5 h-5 text-emerald-400" />
               <span>Tower & Block Configuration</span>
             </h3>
             <p className="text-xs text-slate-400 mb-3">
-              Add custom block names (e.g., Block DSR, Block A, Tower 1)
+              Only registered blocks appear on the Visitor Kiosk
             </p>
 
             <form onSubmit={handleAddBlock} className="flex gap-2 mb-4">
               <input
                 type="text"
-                placeholder="New Block Name (e.g. Block DSR, Tower 2)"
+                placeholder="New Block Name (e.g. Block DSR, Block A)"
                 value={newBlockName}
                 onChange={(e) => setNewBlockName(e.target.value)}
                 className="flex-1 px-3.5 py-2.5 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white font-bold focus:outline-none focus:border-emerald-500"
@@ -826,7 +926,7 @@ export default function AdminPanel({ societyConfig, onUpdateConfig, visitors = [
               {(config.blocks || []).map(block => {
                 const flatCount = (config.flats || []).filter(f => {
                   const b = f.block || (f.number.includes('-') ? f.number.split('-')[0] : '');
-                  return b === block || b === `Block ${block}`;
+                  return b.replace(/^block\s+/i, '').trim().toUpperCase() === block.replace(/^block\s+/i, '').trim().toUpperCase();
                 }).length;
                 return (
                   <div key={block} className="p-3 bg-slate-950 border border-slate-800 rounded-xl flex items-center justify-between">
@@ -834,7 +934,7 @@ export default function AdminPanel({ societyConfig, onUpdateConfig, visitors = [
                       <span className="font-black text-white text-sm">
                         {block.startsWith('Block') ? block : `Block ${block}`}
                       </span>
-                      <span className="text-xs text-slate-400 ml-2">({flatCount} flats mapped)</span>
+                      <span className="text-xs text-slate-400 ml-2">({flatCount} flats registered)</span>
                     </div>
                     <button
                       onClick={() => handleDeleteBlock(block)}
@@ -849,7 +949,6 @@ export default function AdminPanel({ societyConfig, onUpdateConfig, visitors = [
             </div>
           </div>
 
-          {/* Floors Configuration */}
           <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 shadow-xl">
             <h3 className="text-base font-black text-white mb-2 flex items-center gap-2">
               <Building2 className="w-5 h-5 text-emerald-400" />
@@ -972,7 +1071,7 @@ export default function AdminPanel({ societyConfig, onUpdateConfig, visitors = [
             )}
           </div>
 
-          {/* REQUIREMENT 1: SHOW "RESIDENT APP" OPTION (YES / NO) */}
+          {/* SHOW RESIDENT APP OPTION (YES / NO) */}
           <div className="bg-slate-950 border border-slate-700/80 rounded-2xl p-4.5 space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-2.5">
@@ -1099,13 +1198,13 @@ export default function AdminPanel({ societyConfig, onUpdateConfig, visitors = [
         </form>
       )}
 
-      {/* TAB 5: AUDIT LOGS - WITH DATE RANGES, VISITOR DETAILS & EXPORT */}
+      {/* TAB 5: AUDIT LOGS - DATE RANGES, REPORT DOWNLOAD & AUTHORIZED RECORD DELETION */}
       {activeTab === 'logs' && (
         <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 shadow-xl space-y-5">
           {/* Audit Controls & Date Range Filter Section */}
           <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4 space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800/80 pb-3">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <Calendar className="w-5 h-5 text-emerald-400" />
                 <h3 className="text-sm font-bold text-white">
                   Visitor Access Trail & Audit Report
@@ -1115,7 +1214,7 @@ export default function AdminPanel({ societyConfig, onUpdateConfig, visitors = [
                 </span>
               </div>
 
-              {/* Action Download Buttons */}
+              {/* Action Buttons: Download CSV, Download JSON, and Authorized Purge */}
               <div className="flex items-center gap-2 flex-wrap">
                 <button
                   type="button"
@@ -1136,12 +1235,22 @@ export default function AdminPanel({ societyConfig, onUpdateConfig, visitors = [
                   <Download className="w-4 h-4 text-emerald-400" />
                   <span>Download JSON</span>
                 </button>
+
+                {/* REQUIREMENT 2: DELETE TEST LOGS (REQUIRES DSRKUNTA PASSCODE) */}
+                <button
+                  type="button"
+                  onClick={handleRequestPurgeAll}
+                  className="flex items-center gap-1.5 px-3 py-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/30 rounded-xl text-xs font-bold transition"
+                  title="Delete all test logs (Requires master passcode)"
+                >
+                  <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                  <span>Delete Test Records</span>
+                </button>
               </div>
             </div>
 
             {/* Date Range Inputs & Presets */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-              {/* Start Date */}
               <div>
                 <label className="block text-[11px] font-semibold text-slate-400 mb-1">From Date</label>
                 <input
@@ -1152,7 +1261,6 @@ export default function AdminPanel({ societyConfig, onUpdateConfig, visitors = [
                 />
               </div>
 
-              {/* End Date */}
               <div>
                 <label className="block text-[11px] font-semibold text-slate-400 mb-1">To Date</label>
                 <input
@@ -1163,7 +1271,6 @@ export default function AdminPanel({ societyConfig, onUpdateConfig, visitors = [
                 />
               </div>
 
-              {/* Status Filter */}
               <div>
                 <label className="block text-[11px] font-semibold text-slate-400 mb-1">Status Filter</label>
                 <select
@@ -1180,7 +1287,6 @@ export default function AdminPanel({ societyConfig, onUpdateConfig, visitors = [
                 </select>
               </div>
 
-              {/* Keyword Search */}
               <div>
                 <label className="block text-[11px] font-semibold text-slate-400 mb-1">Search Visitor / Flat / Vehicle</label>
                 <div className="relative">
@@ -1233,22 +1339,10 @@ export default function AdminPanel({ societyConfig, onUpdateConfig, visitors = [
                   This Month
                 </button>
               </div>
-
-              <button
-                type="button"
-                onClick={() => {
-                  if (confirm("Reset demo visitor activity logs? (Your custom apartment name and flats directory will NOT be modified)")) {
-                    resetSeedData(false);
-                  }
-                }}
-                className="px-2.5 py-1 text-slate-500 hover:text-slate-300 text-[11px] font-medium transition"
-              >
-                Reset Sample Demo Entries
-              </button>
             </div>
           </div>
 
-          {/* Detailed Visitor Audit Table with "Approved By" */}
+          {/* Detailed Visitor Audit Table with "Approved By" and Row Deletion */}
           <div className="overflow-x-auto rounded-2xl border border-slate-800">
             <table className="w-full text-left text-xs">
               <thead className="bg-slate-950 text-slate-400 uppercase font-semibold border-b border-slate-800">
@@ -1262,13 +1356,14 @@ export default function AdminPanel({ societyConfig, onUpdateConfig, visitors = [
                   <th className="py-3 px-3">Status</th>
                   <th className="py-3 px-3">Approved By / Decided By</th>
                   <th className="py-3 px-3">Passcode</th>
+                  <th className="py-3 px-3 text-right">Delete</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/80">
                 {filteredVisitors.length === 0 ? (
                   <tr>
-                    <td colSpan="9" className="py-8 text-center text-slate-500">
-                      No visitor records match the selected date range and filter criteria.
+                    <td colSpan="10" className="py-8 text-center text-slate-500">
+                      No visitor records found.
                     </td>
                   </tr>
                 ) : (
@@ -1323,6 +1418,16 @@ export default function AdminPanel({ societyConfig, onUpdateConfig, visitors = [
                         <td className="py-2.5 px-3 font-mono text-amber-400 text-xs font-bold">
                           {v.otp || '—'}
                         </td>
+                        <td className="py-2.5 px-3 text-right">
+                          <button
+                            type="button"
+                            onClick={() => handleRequestDeleteOne(v)}
+                            className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition"
+                            title="Delete this record (Requires master passcode)"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </td>
                       </tr>
                     );
                   })
@@ -1332,6 +1437,18 @@ export default function AdminPanel({ societyConfig, onUpdateConfig, visitors = [
           </div>
         </div>
       )}
+
+      {/* MASTER DELETION MODAL (DSRKUNTA PASSCODE REQUIRED) */}
+      <DeleteAuditModal
+        isOpen={isDeleteModalOpen}
+        onClose={() => {
+          setIsDeleteModalOpen(false);
+          setDeleteTargetId(null);
+        }}
+        onConfirm={handleExecuteAuthorizedDelete}
+        isBulk={deleteTargetId === 'ALL'}
+        recordName={deleteTargetName}
+      />
     </div>
   );
 }

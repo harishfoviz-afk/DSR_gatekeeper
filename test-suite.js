@@ -4,7 +4,8 @@ import {
   cleanPhoneNumber,
   generateApprovalUrls,
   formatWhatsAppMessage,
-  generateWhatsAppLink
+  generateWhatsAppLink,
+  getFlatApprovers
 } from './src/utils/whatsapp.js';
 import { PURPOSE_CONFIG, INITIAL_VISITORS, DEFAULT_SOCIETY_CONFIG, LANGUAGE_OPTIONS } from './src/services/mockData.js';
 
@@ -72,6 +73,12 @@ const dsrFlat = DEFAULT_SOCIETY_CONFIG.flats.find(f => f.number === 'Block DSR-5
 assert.ok(dsrFlat, "Flat Block DSR-502 exists in directory");
 assert.strictEqual(dsrFlat.residentName, 'Harish', "Resident name is Harish");
 assert.ok(dsrFlat.phone && cleanPhoneNumber(dsrFlat.phone).length >= 10, "Resident has valid mobile number for WhatsApp");
-console.log("✓ Society config retention & flat owner mobile mapping verified");
+
+// Multi-approver test
+const approvers = getFlatApprovers(dsrFlat);
+assert.strictEqual(approvers.length, 2, "Flat has 2 configured approvers");
+assert.strictEqual(approvers[0].name, 'Harish', "Primary approver is Harish");
+assert.strictEqual(approvers[1].name, 'Co-Owner', "Secondary approver is Co-Owner");
+console.log("✓ Society config retention, flat owner mobile mapping & multi-approvers verified");
 
 console.log("\nAll tests passed with 100% success!");

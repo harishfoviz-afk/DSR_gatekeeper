@@ -6,6 +6,7 @@ import VisitorKiosk from './components/Kiosk/VisitorKiosk';
 import ResidentPortal from './components/Resident/ResidentPortal';
 import AdminPanel from './components/Admin/AdminPanel';
 import QuickApproveView from './components/Resident/QuickApproveView';
+import AdminPasscodeModal from './components/Shared/AdminPasscodeModal';
 import { subscribeToVisitors, subscribeToSocietyConfig, resetSeedData } from './services/db';
 
 export default function App() {
@@ -25,15 +26,51 @@ export default function App() {
   const [language, setLanguage] = useState('bilingual-te');
   const [autoAnnounce, setAutoAnnounce] = useState(true);
 
-  // Modals
+  // Modals & Authorization
   const [isFirebaseModalOpen, setIsFirebaseModalOpen] = useState(false);
   const [isVoiceModalOpen, setIsVoiceModalOpen] = useState(false);
+  const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
+  const [isAdminAuthed, setIsAdminAuthed] = useState(() => {
+    try {
+      return sessionStorage.getItem('gatekeeper_admin_authed') === 'true';
+    } catch (e) {
+      return false;
+    }
+  });
+
+  const handleNavigate = (targetView) => {
+    if (targetView === 'admin' && !isAdminAuthed) {
+      setIsAdminModalOpen(true);
+      return;
+    }
+    setActiveView(targetView);
+  };
+
+  const handleAdminAuthSuccess = () => {
+    setIsAdminAuthed(true);
+    setIsAdminModalOpen(false);
+    setActiveView('admin');
+  };
+
+  const handleLockAdmin = () => {
+    try {
+      sessionStorage.removeItem('gatekeeper_admin_authed');
+    } catch (e) {
+      // ignore
+    }
+    setIsAdminAuthed(false);
+    setActiveView('kiosk');
+  };
 
   // Sync active view with window hash (preserve query if quick-approve)
   useEffect(() => {
     if (societyConfig?.showResidentApp === false && activeView === 'resident') {
       setActiveView('kiosk');
       return;
+    }
+
+    if (activeView === 'admin' && !isAdminAuthed) {
+      setIsAdminModalOpen(true);
     }
 
     const currentHashRoute = window.location.hash.replace('#/', '').replace('#', '').split('?')[0].toLowerCase();
@@ -45,17 +82,21 @@ export default function App() {
         window.location.hash = `#/${activeView}`;
       }
     }
-  }, [activeView, societyConfig?.showResidentApp]);
+  }, [activeView, societyConfig?.showResidentApp, isAdminAuthed]);
 
   // Listen to hash changes (back/forward button or external WhatsApp link clicks)
   useEffect(() => {
     const handleHashChange = () => {
       const route = getRouteFromHash();
+      if (route === 'admin' && !isAdminAuthed) {
+        setIsAdminModalOpen(true);
+        return;
+      }
       setActiveView(route);
     };
     window.addEventListener('hashchange', handleHashChange);
     return () => window.removeEventListener('hashchange', handleHashChange);
-  }, []);
+  }, [isAdminAuthed]);
 
   // Real-time visitors and society config subscription
   useEffect(() => {
@@ -88,7 +129,7 @@ export default function App() {
       {activeView !== 'quick-approve' && (
         <Header
           activeView={activeView}
-          setActiveView={setActiveView}
+          setActiveView={handleNavigate}
           visitors={visitors}
           societyConfig={societyConfig}
           syncMode={syncMode}
@@ -122,13 +163,14 @@ export default function App() {
             societyConfig={societyConfig}
             visitors={visitors}
             onUpdateConfig={(updated) => setSocietyConfig(updated)}
+            onLockAdmin={handleLockAdmin}
           />
         )}
 
         {activeView === 'quick-approve' && (
           <QuickApproveView
             visitors={visitors}
-            onNavigateToApp={(view) => setActiveView(view)}
+            onNavigateToApp={(view) => handleNavigate(view)}
           />
         )}
       </main>
@@ -138,7 +180,7 @@ export default function App() {
         <div className="fixed bottom-3 inset-x-0 sm:hidden z-30 px-3">
           <div className="bg-slate-900/95 backdrop-blur-md border border-slate-700/80 rounded-2xl p-1 shadow-2xl flex items-center justify-between text-xs font-bold">
             <button
-              onClick={() => setActiveView('kiosk')}
+              onClick={() => handleNavigate('kiosk')}
               className={`flex-1 py-2 rounded-xl transition ${
                 activeView === 'kiosk' ? 'bg-emerald-500 text-slate-950 font-black' : 'text-slate-400'
               }`}
@@ -147,7 +189,7 @@ export default function App() {
             </button>
             {societyConfig?.showResidentApp !== false && (
               <button
-                onClick={() => setActiveView('resident')}
+                onClick={() => handleNavigate('resident')}
                 className={`flex-1 py-2 rounded-xl transition ${
                   activeView === 'resident' ? 'bg-emerald-500 text-slate-950 font-black' : 'text-slate-400'
                 }`}
@@ -156,7 +198,7 @@ export default function App() {
               </button>
             )}
             <button
-              onClick={() => setActiveView('admin')}
+              onClick={() => handleNavigate('admin')}
               className={`flex-1 py-2 rounded-xl transition ${
                 activeView === 'admin' ? 'bg-emerald-500 text-slate-950 font-black' : 'text-slate-400'
               }`}
@@ -168,6 +210,12 @@ export default function App() {
       )}
 
       {/* Modals */}
+      <AdminPasscodeModal
+        isOpen={isAdminModalOpen}
+        onClose={() => setIsAdminModalOpen(false)}
+        onSuccess={handleAdminAuthSuccess}
+      />
+
       <FirebaseSettingsModal
         isOpen={isFirebaseModalOpen}
         onClose={() => setIsFirebaseModalOpen(false)}
