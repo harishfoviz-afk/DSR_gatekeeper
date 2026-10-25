@@ -19,7 +19,12 @@ import {
   Download,
   AlertCircle,
   AlertTriangle,
-  CheckCircle2
+  CheckCircle2,
+  Calendar,
+  FileSpreadsheet,
+  Search,
+  Filter,
+  Smartphone
 } from 'lucide-react';
 import { saveSocietyConfig, resetSeedData } from '../../services/db';
 
@@ -52,6 +57,12 @@ export default function AdminPanel({ societyConfig, onUpdateConfig, visitors = [
   const [newGuardGate, setNewGuardGate] = useState('Main Gate 1');
   const [newGuardPhone, setNewGuardPhone] = useState('');
 
+  // Audit Logs Filter & Export States
+  const [filterStartDate, setFilterStartDate] = useState('');
+  const [filterEndDate, setFilterEndDate] = useState('');
+  const [filterStatus, setFilterStatus] = useState('ALL');
+  const [searchLogQuery, setSearchLogQuery] = useState('');
+
   // Keep local config in sync with parent prop, preserving active edits
   useEffect(() => {
     if (societyConfig && Object.keys(societyConfig).length > 0) {
@@ -60,7 +71,8 @@ export default function AdminPanel({ societyConfig, onUpdateConfig, visitors = [
         ...(profileDirty ? {
           societyName: prev.societyName,
           gateName: prev.gateName,
-          city: prev.city
+          city: prev.city,
+          showResidentApp: prev.showResidentApp
         } : {})
       }));
       if (!newFlatBlock && societyConfig.blocks?.length) {
@@ -214,7 +226,7 @@ export default function AdminPanel({ societyConfig, onUpdateConfig, visitors = [
   };
 
   // ----------------------------------------------------
-  // SOCIETY PROFILE OPERATIONS (AUTO-SAVE & SUBMIT)
+  // SOCIETY PROFILE & VISIBILITY OPERATIONS
   // ----------------------------------------------------
   const handleProfileChange = (field, value) => {
     setConfig(prev => ({ ...prev, [field]: value }));
@@ -232,15 +244,160 @@ export default function AdminPanel({ societyConfig, onUpdateConfig, visitors = [
     triggerSave(config);
   };
 
-  // Export Visitor Log
-  const handleExportVisitors = () => {
-    const jsonStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(visitors, null, 2));
-    const downloadAnchor = document.createElement('a');
-    downloadAnchor.setAttribute("href", jsonStr);
-    downloadAnchor.setAttribute("download", `gatekeeper_visitor_log_${Date.now()}.json`);
-    document.body.appendChild(downloadAnchor);
-    downloadAnchor.click();
-    downloadAnchor.remove();
+  const handleToggleResidentApp = (shouldShow) => {
+    const updated = {
+      ...config,
+      showResidentApp: shouldShow
+    };
+    triggerSave(updated);
+  };
+
+  // ----------------------------------------------------
+  // AUDIT LOG FILTERING & EXPORT ENGINE
+  // ----------------------------------------------------
+  const getApprovedByText = (v) => {
+    if (v.approvedBy) return v.approvedBy;
+    if (v.status === 'APPROVED') return `Resident (${v.flatNumber})`;
+    if (v.status === 'DENIED') return `Resident (${v.flatNumber}) - ${v.deniedReason || 'Denied'}`;
+    if (v.status === 'INSIDE') return 'Security Guard (Passed Inside)';
+    if (v.status === 'EXITED') return 'Security Guard (Exit Logged)';
+    if (v.status === 'PENDING') return 'Awaiting Resident Approval';
+    return '—';
+  };
+
+  const handleSetDatePreset = (preset) => {
+    const today = new Date();
+    const toDateStr = today.toISOString().split('T')[0];
+
+    if (preset === 'ALL') {
+      setFilterStartDate('');
+      setFilterEndDate('');
+    } else if (preset === 'TODAY') {
+      setFilterStartDate(toDateStr);
+      setFilterEndDate(toDateStr);
+    } else if (preset === '7DAYS') {
+      const past = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
+      setFilterStartDate(past.toISOString().split('T')[0]);
+      setFilterEndDate(toDateStr);
+    } else if (preset === '30DAYS') {
+      const past = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000);
+      setFilterStartDate(past.toISOString().split('T')[0]);
+      setFilterEndDate(toDateStr);
+    } else if (preset === 'THIS_MONTH') {
+      const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+      setFilterStartDate(startOfMonth.toISOString().split('T')[0]);
+      setFilterEndDate(toDateStr);
+    }
+  };
+
+  const filteredVisitors = visitors.filter(v => {
+    const vDate = v.timestamp ? new Date(v.timestamp) : null;
+    if (filterStartDate && vDate) {
+      const start = new Date(filterStartDate);
+      start.setHours(0, 0, 0, 0);
+      if (vDate < start) return false;
+    }
+    if (filterEndDate && vDate) {
+      const end = new Date(filterEndDate);
+      end.setHours(23, 59, 59, 999);
+      if (vDate > end) return false;
+    }
+    if (filterStatus !== 'ALL' && v.status !== filterStatus) {
+      return false;
+    }
+    if (searchLogQuery.trim()) {
+      const q = searchLogQuery.toLowerCase().trim();
+      const matchName = v.visitorName?.toLowerCase().includes(q);
+      const matchFlat = v.flatNumber?.toLowerCase().includes(q);
+      const matchPhone = v.phone?.toLowerCase().includes(q);
+      const matchVehicle = v.vehicleNumber?.toLowerCase().includes(q);
+      const matchPurpose = (v.purposeLabel || v.purpose || '').toLowerCase().includes(q);
+      const matchApprovedBy = getApprovedByText(v).toLowerCase().includes(q);
+      if (!matchName && !matchFlat && !matchPhone && !matchVehicle && !matchPurpose && !matchApprovedBy) {
+        return false;
+      }
+    }
+    return true;
+  });
+
+  // Download filtered data as CSV (Excel compatible)
+  const handleExportCSV = () => {
+    const headers = [
+      "Record ID",
+      "Check-in Date",
+      "Check-in Time",
+      "Visitor Name",
+      "Mobile Number",
+      "Flat Number",
+      "Purpose",
+      "Vehicle Number",
+      "Status",
+      "Approved By / Decision",
+      "Denial Reason",
+      "Passcode (OTP)",
+      "Notes"
+    ];
+
+    const escapeCsv = (val) => {
+      if (val === null || val === undefined) return '""';
+      const str = String(val).replace(/"/g, '""');
+      return `"${str}"`;
+    };
+
+    const rows = filteredVisitors.map(v => {
+      const dateObj = v.timestamp ? new Date(v.timestamp) : new Date();
+      const dateStr = dateObj.toLocaleDateString();
+      const timeStr = dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      const approvedByStr = getApprovedByText(v);
+
+      return [
+        escapeCsv(v.id),
+        escapeCsv(dateStr),
+        escapeCsv(timeStr),
+        escapeCsv(v.visitorName),
+        escapeCsv(v.phone || '—'),
+        escapeCsv(v.flatNumber),
+        escapeCsv(v.purposeLabel || v.purpose || 'Visit'),
+        escapeCsv(v.vehicleNumber || '—'),
+        escapeCsv(v.status),
+        escapeCsv(approvedByStr),
+        escapeCsv(v.deniedReason || '—'),
+        escapeCsv(v.otp || '—'),
+        escapeCsv(v.notes || '—')
+      ].join(',');
+    });
+
+    const csvContent = [headers.join(','), ...rows].join('\r\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    const dateRangeSuffix = filterStartDate || filterEndDate
+      ? `${filterStartDate || 'start'}_to_${filterEndDate || 'end'}`
+      : 'all_records';
+    link.download = `gatekeeper_visitors_${dateRangeSuffix}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  // Download filtered data as JSON
+  const handleExportJSON = () => {
+    const dataToExport = filteredVisitors.map(v => ({
+      ...v,
+      approvedBy: getApprovedByText(v)
+    }));
+    const jsonStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(dataToExport, null, 2));
+    const link = document.createElement('a');
+    link.href = jsonStr;
+    const dateRangeSuffix = filterStartDate || filterEndDate
+      ? `${filterStartDate || 'start'}_to_${filterEndDate || 'end'}`
+      : 'all_records';
+    link.download = `gatekeeper_visitors_${dateRangeSuffix}.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
   };
 
   return (
@@ -269,6 +426,16 @@ export default function AdminPanel({ societyConfig, onUpdateConfig, visitors = [
                   Data Persistently Saved in LocalStorage & Cloud
                 </span>
               )}
+
+              {/* Show Resident App Status Pill */}
+              <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full border flex items-center gap-1 ${
+                config.showResidentApp !== false
+                  ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                  : 'bg-rose-500/15 text-rose-400 border-rose-500/30'
+              }`}>
+                <Smartphone className="w-3 h-3" />
+                <span>Resident App: {config.showResidentApp !== false ? 'Shown' : 'Hidden'}</span>
+              </span>
             </div>
             <div className="flex items-center gap-2 mt-1">
               <h2 className="text-2xl sm:text-3xl font-black text-white tracking-tight">
@@ -301,11 +468,15 @@ export default function AdminPanel({ societyConfig, onUpdateConfig, visitors = [
             </button>
           )}
           <button
-            onClick={handleExportVisitors}
-            className="flex items-center gap-1.5 px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-semibold transition"
+            onClick={() => {
+              setActiveTab('logs');
+              setTimeout(handleExportCSV, 100);
+            }}
+            className="flex items-center gap-1.5 px-3.5 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black rounded-xl text-xs transition shadow-lg shadow-emerald-500/20"
+            title="Download full visitor activity report as CSV"
           >
-            <Download className="w-4 h-4 text-emerald-400" />
-            <span>Export Logs (JSON)</span>
+            <FileSpreadsheet className="w-4 h-4 stroke-[2.5]" />
+            <span>Download CSV Report</span>
           </button>
         </div>
       </div>
@@ -316,8 +487,8 @@ export default function AdminPanel({ societyConfig, onUpdateConfig, visitors = [
           { id: 'flats', label: 'Flats & Residents', sub: 'Apartments & Mobile Directory', icon: DoorClosed, count: config.flats?.length || 0 },
           { id: 'blocks', label: 'Blocks & Floors', sub: 'Towers & Floor Levels', icon: Layers, count: config.blocks?.length || 0 },
           { id: 'guards', label: 'Security Guards', sub: 'Staff & Shift Rosters', icon: Shield, count: config.guards?.length || 0 },
-          { id: 'society', label: 'Apartment Profile', sub: 'Society Name & Gate Details', icon: Building2 },
-          { id: 'logs', label: 'Audit Records', sub: 'Visitor Access Trail', icon: Info, count: visitors.length },
+          { id: 'society', label: 'Apartment Profile', sub: 'Society & Resident App Visibility', icon: Building2 },
+          { id: 'logs', label: 'Audit Records', sub: 'Date Filters & Report Export', icon: Info, count: visitors.length },
         ].map(tab => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;
@@ -781,17 +952,17 @@ export default function AdminPanel({ societyConfig, onUpdateConfig, visitors = [
         </div>
       )}
 
-      {/* TAB 4: APARTMENT SOCIETY PROFILE (RETAINS KEYED-IN DETAILS WITH AUTO-SAVE) */}
+      {/* TAB 4: APARTMENT SOCIETY PROFILE & RESIDENT APP VISIBILITY */}
       {activeTab === 'society' && (
-        <form onSubmit={handleSaveProfile} className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-xl space-y-5 max-w-2xl">
+        <form onSubmit={handleSaveProfile} className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-xl space-y-6 max-w-2xl">
           <div className="flex items-center justify-between border-b border-slate-800 pb-3">
             <div>
               <h3 className="text-base font-black text-white flex items-center gap-2">
                 <Building2 className="w-5 h-5 text-emerald-400" />
-                <span>Community Identity & Details</span>
+                <span>Community Identity & Feature Controls</span>
               </h3>
               <p className="text-xs text-slate-400">
-                Keyed-in details are automatically retained and synced to LocalStorage & Cloud
+                Keyed-in details and navigation settings persist across LocalStorage & Cloud
               </p>
             </div>
             {savedSuccess && (
@@ -799,6 +970,58 @@ export default function AdminPanel({ societyConfig, onUpdateConfig, visitors = [
                 <CheckCircle2 className="w-4 h-4" /> Saved!
               </span>
             )}
+          </div>
+
+          {/* REQUIREMENT 1: SHOW "RESIDENT APP" OPTION (YES / NO) */}
+          <div className="bg-slate-950 border border-slate-700/80 rounded-2xl p-4.5 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
+                  <Smartphone className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-bold text-white">Show "Resident App" in Navigation</h4>
+                  <p className="text-[11px] text-slate-400">
+                    If set to No, the Resident App tab is completely hidden from the header and mobile navigation
+                  </p>
+                </div>
+              </div>
+              <span className={`text-xs px-2.5 py-1 rounded-full font-extrabold border ${
+                config.showResidentApp !== false
+                  ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40'
+                  : 'bg-rose-500/20 text-rose-400 border-rose-500/40'
+              }`}>
+                {config.showResidentApp !== false ? 'YES (Visible)' : 'NO (Hidden)'}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 pt-1">
+              <button
+                type="button"
+                onClick={() => handleToggleResidentApp(true)}
+                className={`flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-xs font-bold transition border ${
+                  config.showResidentApp !== false
+                    ? 'bg-emerald-500 text-slate-950 border-emerald-400 shadow-lg shadow-emerald-500/20 font-black'
+                    : 'bg-slate-900 text-slate-300 border-slate-700 hover:border-slate-600'
+                }`}
+              >
+                <Check className="w-4 h-4 stroke-[3]" />
+                <span>YES - Show Resident App</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleToggleResidentApp(false)}
+                className={`flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-xs font-bold transition border ${
+                  config.showResidentApp === false
+                    ? 'bg-rose-500 text-white border-rose-400 shadow-lg shadow-rose-500/20 font-black'
+                    : 'bg-slate-900 text-slate-300 border-slate-700 hover:border-slate-600'
+                }`}
+              >
+                <X className="w-4 h-4 stroke-[3]" />
+                <span>NO - Hide Resident App</span>
+              </button>
+            </div>
           </div>
 
           <div>
@@ -844,19 +1067,19 @@ export default function AdminPanel({ societyConfig, onUpdateConfig, visitors = [
 
           <div>
             <label className="block text-xs font-semibold text-slate-300 mb-1.5 flex items-center justify-between">
-              <span>Public Web URL for WhatsApp Links (Optional)</span>
-              <span className="text-[10px] text-emerald-400">Makes links 1-tap clickable</span>
+              <span>Public Web URL for WhatsApp Links</span>
+              <span className="text-[10px] text-emerald-400">1-Tap Clickable Links</span>
             </label>
             <input
               type="text"
               value={config.publicAppUrl || ''}
               onChange={(e) => handleProfileChange('publicAppUrl', e.target.value)}
               onBlur={handleProfileBlur}
-              placeholder="e.g. https://your-name.github.io/DSRV or ngrok URL"
+              placeholder="e.g. https://harishfoviz-afk.github.io/DSR_gatekeeper"
               className="w-full px-4 py-3 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-500 font-mono"
             />
             <p className="text-[11px] text-slate-500 mt-1">
-              WhatsApp disables clickable links for <code>http://localhost</code>. Enter your deployed GitHub Pages or public domain here so WhatsApp formats them as 1-tap blue links on phones!
+              WhatsApp disables clickable links for <code>http://localhost</code>. Your deployed GitHub Pages URL is configured so WhatsApp turns links into blue 1-tap buttons!
             </p>
           </div>
 
@@ -876,51 +1099,234 @@ export default function AdminPanel({ societyConfig, onUpdateConfig, visitors = [
         </form>
       )}
 
-      {/* TAB 5: AUDIT LOGS */}
+      {/* TAB 5: AUDIT LOGS - WITH DATE RANGES, VISITOR DETAILS & EXPORT */}
       {activeTab === 'logs' && (
-        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 shadow-xl">
-          <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-            <h3 className="text-base font-black text-white flex items-center gap-2">
-              <Info className="w-5 h-5 text-emerald-400" />
-              <span>Visitor Access Audit Trail ({visitors.length} total entries)</span>
-            </h3>
-            <div className="flex items-center gap-2">
+        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 shadow-xl space-y-5">
+          {/* Audit Controls & Date Range Filter Section */}
+          <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4 space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800/80 pb-3">
+              <div className="flex items-center gap-2">
+                <Calendar className="w-5 h-5 text-emerald-400" />
+                <h3 className="text-sm font-bold text-white">
+                  Visitor Access Trail & Audit Report
+                </h3>
+                <span className="text-xs bg-slate-800 text-emerald-400 px-2 py-0.5 rounded-full font-mono">
+                  {filteredVisitors.length} of {visitors.length} Records
+                </span>
+              </div>
+
+              {/* Action Download Buttons */}
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  type="button"
+                  onClick={handleExportCSV}
+                  className="flex items-center gap-1.5 px-3.5 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black rounded-xl text-xs transition shadow-lg shadow-emerald-500/20"
+                  title="Download filtered records as CSV spreadsheet"
+                >
+                  <FileSpreadsheet className="w-4 h-4 stroke-[2.5]" />
+                  <span>Download CSV (Excel)</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleExportJSON}
+                  className="flex items-center gap-1.5 px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-semibold transition"
+                  title="Download structured JSON"
+                >
+                  <Download className="w-4 h-4 text-emerald-400" />
+                  <span>Download JSON</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Date Range Inputs & Presets */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              {/* Start Date */}
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-400 mb-1">From Date</label>
+                <input
+                  type="date"
+                  value={filterStartDate}
+                  onChange={(e) => setFilterStartDate(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-500 font-mono"
+                />
+              </div>
+
+              {/* End Date */}
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-400 mb-1">To Date</label>
+                <input
+                  type="date"
+                  value={filterEndDate}
+                  onChange={(e) => setFilterEndDate(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-500 font-mono"
+                />
+              </div>
+
+              {/* Status Filter */}
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-400 mb-1">Status Filter</label>
+                <select
+                  value={filterStatus}
+                  onChange={(e) => setFilterStatus(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-500 font-bold"
+                >
+                  <option value="ALL">All Statuses</option>
+                  <option value="APPROVED">APPROVED (Allowed In)</option>
+                  <option value="DENIED">DENIED (Rejected)</option>
+                  <option value="PENDING">PENDING (Awaiting Decision)</option>
+                  <option value="INSIDE">INSIDE (On Premises)</option>
+                  <option value="EXITED">EXITED (Visit Complete)</option>
+                </select>
+              </div>
+
+              {/* Keyword Search */}
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-400 mb-1">Search Visitor / Flat / Vehicle</label>
+                <div className="relative">
+                  <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-2.5" />
+                  <input
+                    type="text"
+                    placeholder="Search records..."
+                    value={searchLogQuery}
+                    onChange={(e) => setSearchLogQuery(e.target.value)}
+                    className="w-full pl-8 pr-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Quick Date Presets Bar */}
+            <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-800/60">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-[11px] font-semibold text-slate-400 mr-1 flex items-center gap-1">
+                  <Filter className="w-3 h-3 text-emerald-400" /> Presets:
+                </span>
+                <button
+                  type="button"
+                  onClick={() => handleSetDatePreset('ALL')}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition ${
+                    !filterStartDate && !filterEndDate ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40' : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
+                  }`}
+                >
+                  All Time
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSetDatePreset('TODAY')}
+                  className="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-slate-900 text-slate-400 hover:text-white border border-slate-800 transition"
+                >
+                  Today
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSetDatePreset('7DAYS')}
+                  className="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-slate-900 text-slate-400 hover:text-white border border-slate-800 transition"
+                >
+                  Last 7 Days
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSetDatePreset('THIS_MONTH')}
+                  className="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-slate-900 text-slate-400 hover:text-white border border-slate-800 transition"
+                >
+                  This Month
+                </button>
+              </div>
+
               <button
+                type="button"
                 onClick={() => {
                   if (confirm("Reset demo visitor activity logs? (Your custom apartment name and flats directory will NOT be modified)")) {
                     resetSeedData(false);
                   }
                 }}
-                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-lg text-xs font-semibold transition"
+                className="px-2.5 py-1 text-slate-500 hover:text-slate-300 text-[11px] font-medium transition"
               >
-                Reset Visitor Activity Logs
+                Reset Sample Demo Entries
               </button>
             </div>
           </div>
 
-          <div className="overflow-x-auto">
+          {/* Detailed Visitor Audit Table with "Approved By" */}
+          <div className="overflow-x-auto rounded-2xl border border-slate-800">
             <table className="w-full text-left text-xs">
               <thead className="bg-slate-950 text-slate-400 uppercase font-semibold border-b border-slate-800">
                 <tr>
-                  <th className="py-2.5 px-3">Time</th>
-                  <th className="py-2.5 px-3">Visitor</th>
-                  <th className="py-2.5 px-3">Flat</th>
-                  <th className="py-2.5 px-3">Purpose</th>
-                  <th className="py-2.5 px-3">Status</th>
-                  <th className="py-2.5 px-3">Passcode</th>
+                  <th className="py-3 px-3">Date & Time</th>
+                  <th className="py-3 px-3">Visitor Name</th>
+                  <th className="py-3 px-3">Contact</th>
+                  <th className="py-3 px-3">Flat</th>
+                  <th className="py-3 px-3">Purpose</th>
+                  <th className="py-3 px-3">Vehicle</th>
+                  <th className="py-3 px-3">Status</th>
+                  <th className="py-3 px-3">Approved By / Decided By</th>
+                  <th className="py-3 px-3">Passcode</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/80">
-                {visitors.map(v => (
-                  <tr key={v.id} className="hover:bg-slate-800/40">
-                    <td className="py-2.5 px-3 text-slate-400">{new Date(v.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</td>
-                    <td className="py-2.5 px-3 font-bold text-white">{v.visitorName}</td>
-                    <td className="py-2.5 px-3 font-mono text-emerald-400">{v.flatNumber}</td>
-                    <td className="py-2.5 px-3 text-slate-300">{v.purposeLabel}</td>
-                    <td className="py-2.5 px-3 font-bold">{v.status}</td>
-                    <td className="py-2.5 px-3 font-mono text-amber-400">{v.otp || '—'}</td>
+                {filteredVisitors.length === 0 ? (
+                  <tr>
+                    <td colSpan="9" className="py-8 text-center text-slate-500">
+                      No visitor records match the selected date range and filter criteria.
+                    </td>
                   </tr>
-                ))}
+                ) : (
+                  filteredVisitors.map(v => {
+                    const approvedByStr = getApprovedByText(v);
+                    const dateObj = v.timestamp ? new Date(v.timestamp) : new Date();
+
+                    return (
+                      <tr key={v.id} className="hover:bg-slate-800/40 transition">
+                        <td className="py-2.5 px-3 text-slate-300 font-mono text-[11px]">
+                          <div>{dateObj.toLocaleDateString()}</div>
+                          <div className="text-slate-500 text-[10px]">{dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+                        </td>
+                        <td className="py-2.5 px-3 font-bold text-white">
+                          {v.visitorName}
+                        </td>
+                        <td className="py-2.5 px-3 font-mono text-slate-400 text-[11px]">
+                          {v.phone || '—'}
+                        </td>
+                        <td className="py-2.5 px-3 font-mono font-bold text-emerald-400">
+                          {v.flatNumber}
+                        </td>
+                        <td className="py-2.5 px-3 text-slate-300">
+                          {v.purposeLabel || v.purpose || 'Visit'}
+                        </td>
+                        <td className="py-2.5 px-3 font-mono text-slate-400 uppercase text-[11px]">
+                          {v.vehicleNumber || '—'}
+                        </td>
+                        <td className="py-2.5 px-3">
+                          <span className={`px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider ${
+                            v.status === 'APPROVED'
+                              ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
+                              : v.status === 'DENIED'
+                              ? 'bg-rose-500/20 text-rose-400 border border-rose-500/40'
+                              : v.status === 'PENDING'
+                              ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40'
+                              : 'bg-blue-500/20 text-blue-400 border border-blue-500/40'
+                          }`}>
+                            {v.status}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-3">
+                          <span className="text-[11px] font-medium text-slate-200 bg-slate-950 px-2 py-1 rounded-lg border border-slate-800 block truncate max-w-[200px]" title={approvedByStr}>
+                            {approvedByStr}
+                          </span>
+                          {v.deniedReason && (
+                            <span className="text-[10px] text-rose-400 block mt-0.5">
+                              Reason: {v.deniedReason}
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-2.5 px-3 font-mono text-amber-400 text-xs font-bold">
+                          {v.otp || '—'}
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
               </tbody>
             </table>
           </div>

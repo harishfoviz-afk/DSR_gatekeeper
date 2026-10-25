@@ -4,6 +4,7 @@ export const DEFAULT_SOCIETY_CONFIG = {
   societyName: 'Divi Sri Residency',
   gateName: 'Main Entrance Gate 1',
   city: 'Hyderabad',
+  showResidentApp: true,
   publicAppUrl: 'https://harishfoviz-afk.github.io/DSR_gatekeeper',
   blocks: ['Block DSR', 'A', 'B', 'C', 'D'],
   floors: [1, 2, 3, 4, 5],

@@ -98,24 +98,26 @@ export default function Header({
             <span>Kiosk & Gate Pass</span>
           </button>
 
-          <button
-            onClick={() => setActiveView('resident')}
-            className={`relative flex items-center gap-2 px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition ${
-              activeView === 'resident'
-                ? 'bg-emerald-500 text-slate-950 shadow-md font-black'
-                : 'text-slate-400 hover:text-white hover:bg-slate-900'
-            }`}
-          >
-            <Smartphone className="w-4 h-4" />
-            <span>Resident App</span>
-            {pendingCount > 0 && (
-              <span className={`px-2 py-0.2 rounded-full text-[10px] font-black ${
-                activeView === 'resident' ? 'bg-slate-950 text-emerald-400' : 'bg-amber-500 text-slate-950 animate-pulse'
-              }`}>
-                {pendingCount}
-              </span>
-            )}
-          </button>
+          {societyConfig?.showResidentApp !== false && (
+            <button
+              onClick={() => setActiveView('resident')}
+              className={`relative flex items-center gap-2 px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition ${
+                activeView === 'resident'
+                  ? 'bg-emerald-500 text-slate-950 shadow-md font-black'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-900'
+              }`}
+            >
+              <Smartphone className="w-4 h-4" />
+              <span>Resident App</span>
+              {pendingCount > 0 && (
+                <span className={`px-2 py-0.2 rounded-full text-[10px] font-black ${
+                  activeView === 'resident' ? 'bg-slate-950 text-emerald-400' : 'bg-amber-500 text-slate-950 animate-pulse'
+                }`}>
+                  {pendingCount}
+                </span>
+              )}
+            </button>
+          )}
 
           <button
             onClick={() => setActiveView('admin')}

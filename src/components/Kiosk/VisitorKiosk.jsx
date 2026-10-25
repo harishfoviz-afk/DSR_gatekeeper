@@ -115,7 +115,7 @@ export default function VisitorKiosk({ onVisitorCreated, visitors = [], societyC
         purpose,
         purposeLabel: PURPOSE_CONFIG[purpose]?.label || 'Visit',
         flatNumber,
-        photoUrl: photoUrl || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=300&auto=format&fit=crop&q=80',
+        photoUrl: photoUrl || '',
         status: 'PENDING',
         otp: generatedOtp,
       });
@@ -301,11 +301,17 @@ export default function VisitorKiosk({ onVisitorCreated, visitors = [], societyC
 
             {/* Visitor Details Pill */}
             <div className="flex items-center gap-4 bg-slate-800/70 p-4 rounded-2xl border border-slate-700 mb-6">
-              <img
-                src={liveVisitor.photoUrl}
-                alt={liveVisitor.visitorName}
-                className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl object-cover border-2 border-slate-600 shrink-0 shadow"
-              />
+              {liveVisitor.photoUrl ? (
+                <img
+                  src={liveVisitor.photoUrl}
+                  alt={liveVisitor.visitorName}
+                  className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl object-cover border-2 border-slate-600 shrink-0 shadow"
+                />
+              ) : (
+                <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl bg-slate-900 border-2 border-emerald-500/40 shrink-0 shadow flex items-center justify-center text-emerald-400 font-black text-2xl">
+                  {liveVisitor.visitorName ? liveVisitor.visitorName[0].toUpperCase() : 'V'}
+                </div>
+              )}
               <div className="flex-1 min-w-0">
                 <div className="text-lg sm:text-xl font-black text-white truncate">
                   {liveVisitor.visitorName}

@@ -31,6 +31,11 @@ export default function App() {
 
   // Sync active view with window hash (preserve query if quick-approve)
   useEffect(() => {
+    if (societyConfig?.showResidentApp === false && activeView === 'resident') {
+      setActiveView('kiosk');
+      return;
+    }
+
     const currentHashRoute = window.location.hash.replace('#/', '').replace('#', '').split('?')[0].toLowerCase();
     if (currentHashRoute !== activeView) {
       if (activeView === 'quick-approve') {
@@ -40,7 +45,7 @@ export default function App() {
         window.location.hash = `#/${activeView}`;
       }
     }
-  }, [activeView]);
+  }, [activeView, societyConfig?.showResidentApp]);
 
   // Listen to hash changes (back/forward button or external WhatsApp link clicks)
   useEffect(() => {
@@ -140,14 +145,16 @@ export default function App() {
             >
               Kiosk & Pass
             </button>
-            <button
-              onClick={() => setActiveView('resident')}
-              className={`flex-1 py-2 rounded-xl transition ${
-                activeView === 'resident' ? 'bg-emerald-500 text-slate-950 font-black' : 'text-slate-400'
-              }`}
-            >
-              Resident
-            </button>
+            {societyConfig?.showResidentApp !== false && (
+              <button
+                onClick={() => setActiveView('resident')}
+                className={`flex-1 py-2 rounded-xl transition ${
+                  activeView === 'resident' ? 'bg-emerald-500 text-slate-950 font-black' : 'text-slate-400'
+                }`}
+              >
+                Resident
+              </button>
+            )}
             <button
               onClick={() => setActiveView('admin')}
               className={`flex-1 py-2 rounded-xl transition ${
